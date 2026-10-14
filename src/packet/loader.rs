@@ -38,6 +38,22 @@ impl PacketLoader {
     }
 
     pub fn load_streaming<R: Read + Send + 'static>(
+        mut reader: R,
+        sender: std::sync::mpsc::Sender<PacketRecord>,
+    ) -> Result<()> {
+        let mut magic = [0u8; 4];
+        reader.read_exact(&mut magic).context("Failed reading capture stream header")?;
+        let chained = std::io::Cursor::new(magic).chain(reader);
+        let buf_reader = BufReader::new(chained);
+
+        if magic == [0x0a, 0x0d, 0x0d, 0x0a] {
+            Self::load_streaming_pcapng(buf_reader, sender)
+        } else {
+            Self::load_streaming_pcap(buf_reader, sender)
+        }
+    }
+
+    fn load_streaming_pcap<R: Read>(
         reader: R,
         sender: std::sync::mpsc::Sender<PacketRecord>,
     ) -> Result<()> {
@@ -47,36 +63,105 @@ impl PacketLoader {
         let mut pkt_num = 1;
 
         while let Some(pkt_res) = pcap_reader.next_packet() {
-            if let Ok(pkt) = pkt_res {
-                let ts_secs = pkt.timestamp.as_secs();
-                let ts_nanos = pkt.timestamp.subsec_nanos();
-                let current_ts = ts_secs as f64 + (ts_nanos as f64 / 1_000_000_000.0);
+            match pkt_res {
+                Ok(pkt) => {
+                    let ts_secs = pkt.timestamp.as_secs();
+                    let ts_nanos = pkt.timestamp.subsec_nanos();
+                    let current_ts = ts_secs as f64 + (ts_nanos as f64 / 1_000_000_000.0);
 
-                let rel_time = match first_ts {
-                    None => {
-                        first_ts = Some(current_ts);
-                        0.0
+                    let rel_time = match first_ts {
+                        None => {
+                            first_ts = Some(current_ts);
+                            0.0
+                        }
+                        Some(f) => current_ts - f,
+                    };
+
+                    let record = PacketDissector::dissect(
+                        pkt_num,
+                        rel_time,
+                        ts_secs,
+                        ts_nanos,
+                        &pkt.data,
+                        link_type,
+                    );
+
+                    if sender.send(record).is_err() {
+                        break;
                     }
-                    Some(f) => current_ts - f,
-                };
-
-                let record = PacketDissector::dissect(
-                    pkt_num,
-                    rel_time,
-                    ts_secs,
-                    ts_nanos,
-                    &pkt.data,
-                    link_type,
-                );
-
-                if sender.send(record).is_err() {
-                    break;
+                    pkt_num += 1;
                 }
-                pkt_num += 1;
+                Err(_) => break,
             }
         }
         Ok(())
     }
+
+    fn load_streaming_pcapng<R: Read>(
+        reader: R,
+        sender: std::sync::mpsc::Sender<PacketRecord>,
+    ) -> Result<()> {
+        let mut pcapng_reader = PcapNgReader::new(reader).context("Failed to initialize PCAPNG reader")?;
+        let mut first_ts: Option<f64> = None;
+        let mut pkt_num = 1;
+        let mut link_type = 1u32; // Default Ethernet
+
+        while let Some(block_res) = pcapng_reader.next_block() {
+            if let Ok(block) = block_res {
+                match block {
+                    pcap_file::pcapng::Block::InterfaceDescription(idb) => {
+                        link_type = u32::from(idb.linktype);
+                    }
+                    pcap_file::pcapng::Block::EnhancedPacket(epb) => {
+                        let ts_nanos_total = epb.timestamp.as_nanos();
+                        let ts_secs = (ts_nanos_total / 1_000_000_000) as u64;
+                        let ts_nanos = (ts_nanos_total % 1_000_000_000) as u32;
+                        let current_ts = ts_secs as f64 + (ts_nanos as f64 / 1_000_000_000.0);
+
+                        let rel_time = match first_ts {
+                            None => {
+                                first_ts = Some(current_ts);
+                                0.0
+                            }
+                            Some(f) => current_ts - f,
+                        };
+
+                        let record = PacketDissector::dissect(
+                            pkt_num,
+                            rel_time,
+                            ts_secs,
+                            ts_nanos,
+                            &epb.data,
+                            link_type,
+                        );
+
+                        if sender.send(record).is_err() {
+                            break;
+                        }
+                        pkt_num += 1;
+                    }
+                    pcap_file::pcapng::Block::SimplePacket(spb) => {
+                        let record = PacketDissector::dissect(
+                            pkt_num,
+                            0.0,
+                            0,
+                            0,
+                            &spb.data,
+                            link_type,
+                        );
+
+                        if sender.send(record).is_err() {
+                            break;
+                        }
+                        pkt_num += 1;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        Ok(())
+    }
+
 
     fn load_pcap<R: Read>(reader: R) -> Result<Vec<PacketRecord>> {
         let mut pcap_reader = PcapReader::new(reader).context("Failed to initialize PCAP reader")?;

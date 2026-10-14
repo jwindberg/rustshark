@@ -132,3 +132,61 @@ fn test_conversations_analysis() {
     let parsed_filter = FilterExpr::parse(&generated_filter);
     assert!(parsed_filter.is_ok(), "Generated conversation filter must be valid");
 }
+
+#[test]
+fn test_load_streaming() {
+    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let file = std::fs::File::open(pcap_path).expect("Failed to open sample pcap");
+    let (tx, rx) = std::sync::mpsc::channel();
+
+    let handle = std::thread::spawn(move || {
+        PacketLoader::load_streaming(file, tx).expect("load_streaming should succeed");
+    });
+
+    let mut count = 0;
+    while let Ok(pkt) = rx.recv() {
+        assert_eq!(pkt.summary.num, count + 1);
+        count += 1;
+    }
+    handle.join().unwrap();
+    assert_eq!(count, 92);
+}
+
+#[test]
+fn test_dumpcap_pcapng_streaming() {
+    if std::process::Command::new("dumpcap").arg("-v").output().is_err() {
+        return; // Skip if dumpcap not installed
+    }
+
+    let mut child = match std::process::Command::new("dumpcap")
+        .args(["-i", "en0", "-c", "2", "-w", "-", "-Q"])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(_) => return, // Permission or interface unavailable
+    };
+
+    let stdout = match child.stdout.take() {
+        Some(s) => s,
+        None => return,
+    };
+
+    let (tx, rx) = std::sync::mpsc::channel();
+    let handle = std::thread::spawn(move || {
+        let _ = PacketLoader::load_streaming(stdout, tx);
+    });
+
+    let _ = child.wait();
+    let _ = handle.join();
+
+    let mut count = 0;
+    while let Ok(pkt) = rx.try_recv() {
+        assert!(pkt.summary.num >= 1);
+        count += 1;
+    }
+    println!("Dumpcap streaming test captured {} live packets", count);
+}
+
+

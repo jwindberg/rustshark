@@ -73,7 +73,7 @@ fn spawn_live_capture(
 ) -> (Option<std::process::Child>, Option<String>) {
     let mut cmd = if std::process::Command::new("dumpcap").arg("-v").output().is_ok() {
         let mut c = std::process::Command::new("dumpcap");
-        c.args(["-i", iface, "-w", "-"]);
+        c.args(["-i", iface, "-w", "-", "-Q"]);
         if let Some(cf) = filter {
             c.args(["-f", cf]);
         }
@@ -110,6 +110,18 @@ fn spawn_live_capture(
                     err_msg = format!("Permission denied on {}: run with 'sudo ./rustshark'", iface);
                 }
                 return (None, Some(err_msg));
+            }
+
+            // Continuously drain stderr in background to prevent OS pipe buffer deadlocks
+            if let Some(mut stderr) = child.stderr.take() {
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 1024];
+                    while let Ok(n) = std::io::Read::read(&mut stderr, &mut buf) {
+                        if n == 0 {
+                            break;
+                        }
+                    }
+                });
             }
 
             if let Some(stdout) = child.stdout.take() {
