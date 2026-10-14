@@ -25,8 +25,31 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
         }
     }
 
-    // 2. Fall back to ifconfig / ip link
-    #[cfg(unix)]
+    // 2. On Linux, enumerate /sys/class/net
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(entries) = std::fs::read_dir("/sys/class/net") {
+            let mut list = Vec::new();
+            for (i, entry) in entries.flatten().enumerate() {
+                if let Ok(file_name) = entry.file_name().into_string() {
+                    let is_loopback = file_name == "lo" || file_name.starts_with("lo");
+                    list.push(InterfaceInfo {
+                        index: i + 1,
+                        name: file_name.clone(),
+                        description: if is_loopback { "Loopback".to_string() } else { "Network interface".to_string() },
+                        is_loopback,
+                        ip_addresses: Vec::new(),
+                    });
+                }
+            }
+            if !list.is_empty() {
+                return list;
+            }
+        }
+    }
+
+    // 3. On macOS / BSD, check ifconfig -l
+    #[cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd", target_os = "netbsd"))]
     {
         if let Ok(output) = Command::new("ifconfig").arg("-l").output() {
             if output.status.success() {
@@ -41,6 +64,35 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
                         is_loopback,
                         ip_addresses: Vec::new(),
                     });
+                }
+                if !list.is_empty() {
+                    return list;
+                }
+            }
+        }
+    }
+
+    // 4. On Windows, try netsh interface show interface
+    #[cfg(target_os = "windows")]
+    {
+        if let Ok(output) = Command::new("netsh").args(["interface", "show", "interface"]).output() {
+            if output.status.success() {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                let mut list = Vec::new();
+                for (i, line) in stdout.lines().enumerate() {
+                    let trimmed = line.trim();
+                    if trimmed.starts_with("Enabled") || trimmed.starts_with("Connected") || trimmed.starts_with("Dedicated") {
+                        let parts: Vec<&str> = trimmed.split_whitespace().collect();
+                        if let Some(&name) = parts.last() {
+                            list.push(InterfaceInfo {
+                                index: i + 1,
+                                name: name.to_string(),
+                                description: "Windows Network Interface".to_string(),
+                                is_loopback: false,
+                                ip_addresses: Vec::new(),
+                            });
+                        }
+                    }
                 }
                 if !list.is_empty() {
                     return list;
@@ -78,9 +130,9 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
 pub fn default_interface() -> String {
     let ifaces = list_interfaces();
 
-    // 1. Prefer standard primary interfaces (en0 on macOS, eth0/wlan0 on Linux/Raspberry Pi)
-    for target in &["en0", "eth0", "wlan0", "en1", "eth1"] {
-        if ifaces.iter().any(|i| i.name == *target) {
+    // 1. Prefer standard primary interfaces (en0 on macOS, eth0/wlan0 on Linux/Raspberry Pi, Ethernet/Wi-Fi on Windows)
+    for target in &["en0", "eth0", "wlan0", "en1", "eth1", "Ethernet", "Wi-Fi"] {
+        if ifaces.iter().any(|i| i.name.eq_ignore_ascii_case(target)) {
             return target.to_string();
         }
     }
