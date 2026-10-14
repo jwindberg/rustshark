@@ -1,0 +1,28 @@
+# target and build
+/target
+/build
+
+# Cargo-related
+Cargo.lock
+
+# Debug
+*.dSYM
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Rustup
+.rustup
+
+# Clang/LLVM cache
+.clangd
+
+# VSCode
+.vscode/
+
+# Debug builds
+*.debug
+
+# Temp files
+*.tmp
