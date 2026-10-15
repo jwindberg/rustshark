@@ -32,6 +32,45 @@ A high-performance terminal user-interface (TUI) for network packet analysis wri
 ### Prerequisites
 
 - [Rust](https://rustup.rs/) (1.80+ or latest stable)
+- `dumpcap` (recommended for non-root live captures, provided by `wireshark-common` or `tshark`)
+
+### Capturing Without Root (`wireshark` Group)
+
+Running network analysis tools with `sudo` is discouraged for security reasons. Like Wireshark and Termshark, Rustshark delegates live capture to `dumpcap`, which relies on Linux capabilities (`cap_net_raw,cap_net_admin`) so non-root users can capture traffic safely:
+
+1. **Install `dumpcap`**:
+   - **Ubuntu / Debian / Linux Mint**:
+     ```bash
+     sudo apt update
+     sudo apt install -y wireshark-common
+     ```
+     When asked *"Should non-superusers be able to capture packets?"*, select **Yes**.  
+     *(If already installed or you were not prompted, run: `sudo dpkg-reconfigure wireshark-common`)*
+   - **Arch Linux**:
+     ```bash
+     sudo pacman -S wireshark-cli
+     ```
+   - **Fedora / RHEL**:
+     ```bash
+     sudo dnf install wireshark-cli
+     ```
+
+2. **Add your user to the `wireshark` group**:
+   ```bash
+   sudo usermod -aG wireshark $USER
+   ```
+
+3. **Activate the group**:
+   Group changes only apply to newly opened sessions. Log out and back in, or run this in your active terminal:
+   ```bash
+   newgrp wireshark
+   ```
+
+4. **Verify**:
+   ```bash
+   dumpcap -D
+   ```
+   If this outputs your network interfaces without `sudo`, non-root packet capture is ready.
 
 ### Build from source
 
