@@ -73,7 +73,7 @@ fn spawn_live_capture(
 ) -> (Option<std::process::Child>, Option<String>) {
     let mut cmd = if std::process::Command::new("dumpcap").arg("-v").output().is_ok() {
         let mut c = std::process::Command::new("dumpcap");
-        c.args(["-i", iface, "-w", "-", "-Q"]);
+        c.args(["-i", iface, "-w", "-", "-q"]);
         if let Some(cf) = filter {
             c.args(["-f", cf]);
         }
