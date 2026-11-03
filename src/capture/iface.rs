@@ -127,24 +127,90 @@ pub fn list_interfaces() -> Vec<InterfaceInfo> {
     ]
 }
 
+fn is_interface_up(name: &str) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        let operstate_path = format!("/sys/class/net/{}/operstate", name);
+        if let Ok(state) = std::fs::read_to_string(&operstate_path) {
+            match state.trim() {
+                "up" => return Some(true),
+                "down" | "dormant" | "notpresent" | "lowerlayerdown" => return Some(false),
+                _ => {
+                    let carrier_path = format!("/sys/class/net/{}/carrier", name);
+                    if let Ok(carrier) = std::fs::read_to_string(&carrier_path) {
+                        return Some(carrier.trim() == "1");
+                    }
+                }
+            }
+        }
+        None
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = name;
+        None
+    }
+}
+
+fn is_pseudo_interface(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    matches!(
+        lower.as_str(),
+        "any"
+            | "nflog"
+            | "nfqueue"
+            | "bluetooth-monitor"
+            | "bluetooth0"
+            | "dbus-system"
+            | "dbus-session"
+            | "ciscodump"
+            | "dpauxmon"
+            | "randpkt"
+            | "sdjournal"
+            | "sshdump"
+            | "udpdump"
+            | "wifidump"
+    ) || lower.starts_with("gif")
+        || lower.starts_with("stf")
+        || lower.starts_with("usbmon")
+}
+
 pub fn default_interface() -> String {
     let ifaces = list_interfaces();
+    let preferred_names = ["en0", "eth0", "wlan0", "en1", "eth1", "Ethernet", "Wi-Fi"];
 
-    // 1. Prefer standard primary interfaces (en0 on macOS, eth0/wlan0 on Linux/Raspberry Pi, Ethernet/Wi-Fi on Windows)
-    for target in &["en0", "eth0", "wlan0", "en1", "eth1", "Ethernet", "Wi-Fi"] {
-        if ifaces.iter().any(|i| i.name.eq_ignore_ascii_case(target)) {
-            return target.to_string();
-        }
-    }
-
-    // 2. Any non-loopback interface
+    // 1. Prefer an interface that is confirmed UP (e.g., on Linux via /sys/class/net/<iface>/operstate),
+    //    checking in the priority order returned by dumpcap/tshark first.
     for i in &ifaces {
-        if !i.is_loopback && i.name != "any" && !i.name.starts_with("gif") && !i.name.starts_with("stf") {
+        if !i.is_loopback && !is_pseudo_interface(&i.name) && is_interface_up(&i.name) == Some(true) {
             return i.name.clone();
         }
     }
 
-    // 3. Fallback
+    // 2. Prefer standard primary interfaces that are not known to be DOWN
+    for target in &preferred_names {
+        if let Some(i) = ifaces.iter().find(|i| i.name.eq_ignore_ascii_case(target)) {
+            if is_interface_up(&i.name) != Some(false) {
+                return i.name.clone();
+            }
+        }
+    }
+
+    // 3. Any non-loopback, non-pseudo interface that is not known to be DOWN
+    for i in &ifaces {
+        if !i.is_loopback && !is_pseudo_interface(&i.name) && is_interface_up(&i.name) != Some(false) {
+            return i.name.clone();
+        }
+    }
+
+    // 4. Any non-loopback, non-pseudo interface (even if currently down)
+    for i in &ifaces {
+        if !i.is_loopback && !is_pseudo_interface(&i.name) {
+            return i.name.clone();
+        }
+    }
+
+    // 5. Fallback
     ifaces.first().map(|i| i.name.clone()).unwrap_or_else(|| "any".to_string())
 }
 

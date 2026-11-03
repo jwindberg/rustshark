@@ -71,6 +71,7 @@ pub struct App {
     // Dialogs
     pub active_modal: ActiveModal,
     pub conversations: Option<Conversations>,
+    pub pending_interface_switch: Option<String>,
 
     // Status feedback
     pub status_message: Option<String>,
@@ -118,9 +119,26 @@ impl App {
 
             active_modal: ActiveModal::None,
             conversations: Some(convs),
+            pending_interface_switch: None,
 
             status_message: None,
         }
+    }
+
+    pub fn reset_for_capture(&mut self, source_name: String, status: Option<String>) {
+        self.packets.clear();
+        self.filtered_indices.clear();
+        self.source_name = source_name;
+        self.packet_list_selected_idx = 0;
+        self.packet_list_scroll_offset = 0;
+        self.tree_selected_row = 0;
+        self.tree_scroll_offset = 0;
+        self.hex_scroll_offset = 0;
+        self.hex_cursor_byte = None;
+        self.marks.clear();
+        self.last_jump_packet = None;
+        self.conversations = Some(Conversations::build(&self.packets));
+        self.status_message = status;
     }
 
     pub fn add_packet(&mut self, pkt: PacketRecord) {
@@ -336,9 +354,14 @@ impl App {
             }
             KeyCode::Char('p') => {
                 let ifaces = list_interfaces();
+                let current_iface = self.source_name.strip_prefix("Interface: ").unwrap_or(&self.source_name);
+                let selected_idx = ifaces
+                    .iter()
+                    .position(|i| i.name == current_iface)
+                    .unwrap_or(0);
                 self.active_modal = ActiveModal::Interfaces {
                     list: ifaces,
-                    selected_idx: 0,
+                    selected_idx,
                 };
             }
 
@@ -669,7 +692,8 @@ impl App {
                 }
                 KeyCode::Enter => {
                     if let Some(iface) = list.get(*selected_idx) {
-                        self.status_message = Some(format!("Selected interface: {}", iface.name));
+                        let iface_name = iface.name.clone();
+                        self.pending_interface_switch = Some(iface_name);
                         self.active_modal = ActiveModal::None;
                     }
                 }

@@ -174,7 +174,7 @@ fn main() -> Result<()> {
     let theme_variant = ThemeVariant::from_name(&cli.theme);
 
     // 4. Load packets or start live capture on default interface
-    let (source_name, packets, live_child, packet_rx, init_status) = if let Some(path) = pcap_path {
+    let (source_name, packets, mut live_child, mut packet_rx, init_status) = if let Some(path) = pcap_path {
         let pkts = PacketLoader::load_from_file(&path)
             .with_context(|| format!("Error loading pcap from {}", path))?;
         (path, pkts, None, None, None)
@@ -210,6 +210,20 @@ fn main() -> Result<()> {
     let mut running = true;
 
     while running {
+        // Handle live interface switch requested from the 'p' modal
+        if let Some(new_iface) = app.pending_interface_switch.take() {
+            if let Some(mut child) = live_child.take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (child, err) = spawn_live_capture(&new_iface, cli.capture_filter.as_deref(), tx);
+            let status = err.or_else(|| Some(format!("Listening on {} (Live capture active)", new_iface)));
+            live_child = child;
+            packet_rx = Some(rx);
+            app.reset_for_capture(format!("Interface: {}", new_iface), status);
+        }
+
         // Poll for newly arrived packets if live capturing
         if let Some(rx) = &packet_rx {
             while let Ok(pkt) = rx.try_recv() {
