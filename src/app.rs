@@ -53,6 +53,7 @@ pub struct App {
     // Selections and offsets
     pub packet_list_selected_idx: usize,
     pub packet_list_scroll_offset: usize,
+    pub packet_list_visible_rows: std::cell::Cell<usize>,
     pub tree_selected_row: usize,
     pub tree_scroll_offset: usize,
     pub hex_scroll_offset: usize,
@@ -104,6 +105,7 @@ impl App {
 
             packet_list_selected_idx: 0,
             packet_list_scroll_offset: 0,
+            packet_list_visible_rows: std::cell::Cell::new(15),
             tree_selected_row: 0,
             tree_scroll_offset: 0,
             hex_scroll_offset: 0,
@@ -150,10 +152,22 @@ impl App {
             true
         };
 
+        // Follow the tail of a live capture while the cursor sits on the last row
+        // (as Termshark does). Moving the cursor up stops following; End/G resumes.
+        let n_before = self.filtered_indices.len();
+        let following = n_before == 0 || self.packet_list_selected_idx + 1 == n_before;
+
         let new_idx = self.packets.len();
         self.packets.push(pkt);
         if is_matching {
             self.filtered_indices.push(new_idx);
+            if following && n_before > 0 {
+                self.packet_list_selected_idx = n_before;
+                self.tree_selected_row = 0;
+                self.tree_scroll_offset = 0;
+                self.hex_scroll_offset = 0;
+                self.adjust_packet_list_scroll();
+            }
         }
     }
 
@@ -477,12 +491,12 @@ impl App {
                 }
             }
             KeyCode::PageDown => {
-                self.packet_list_selected_idx = (self.packet_list_selected_idx + 15).min(n_items - 1);
+                self.packet_list_selected_idx = (self.packet_list_selected_idx + self.packet_list_visible_rows.get()).min(n_items - 1);
                 self.adjust_packet_list_scroll();
                 self.tree_selected_row = 0;
             }
             KeyCode::PageUp => {
-                self.packet_list_selected_idx = self.packet_list_selected_idx.saturating_sub(15);
+                self.packet_list_selected_idx = self.packet_list_selected_idx.saturating_sub(self.packet_list_visible_rows.get());
                 self.adjust_packet_list_scroll();
                 self.tree_selected_row = 0;
             }
@@ -707,8 +721,11 @@ impl App {
     fn adjust_packet_list_scroll(&mut self) {
         if self.packet_list_selected_idx < self.packet_list_scroll_offset {
             self.packet_list_scroll_offset = self.packet_list_selected_idx;
-        } else if self.packet_list_selected_idx >= self.packet_list_scroll_offset + 15 {
-            self.packet_list_scroll_offset = self.packet_list_selected_idx.saturating_sub(14);
+        } else {
+            let rows = self.packet_list_visible_rows.get().max(1);
+            if self.packet_list_selected_idx >= self.packet_list_scroll_offset + rows {
+                self.packet_list_scroll_offset = self.packet_list_selected_idx + 1 - rows;
+            }
         }
     }
 

@@ -11,6 +11,7 @@ pub fn render_packet_list(
     packets: &[&PacketRecord],
     selected_idx: usize,
     scroll_offset: usize,
+    visible_rows: &std::cell::Cell<usize>,
     is_focused: bool,
     theme: &Theme,
     sort_column: usize,
@@ -46,7 +47,18 @@ pub fn render_packet_list(
     let visible_height = area.height.saturating_sub(2) as usize; // subtracting borders
     let max_rows = visible_height.saturating_sub(1); // subtracting header
 
-    let start_idx = scroll_offset;
+    // Report the real height back to the app so keyboard scrolling matches the pane.
+    visible_rows.set(max_rows.max(1));
+
+    // Always keep the selected row on screen, even if the stored offset is stale.
+    let mut start_idx = scroll_offset;
+    if max_rows > 0 {
+        if selected_idx >= start_idx + max_rows {
+            start_idx = selected_idx + 1 - max_rows;
+        } else if selected_idx < start_idx {
+            start_idx = selected_idx;
+        }
+    }
     let end_idx = (start_idx + max_rows).min(packets.len());
 
     let mut rows = Vec::new();
