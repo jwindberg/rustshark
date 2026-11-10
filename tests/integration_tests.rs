@@ -35,7 +35,7 @@ fn test_list_interfaces() {
 
 #[test]
 fn test_load_sample_pcap() {
-    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let pcap_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/telnet-cooked.pcap");
     assert!(Path::new(pcap_path).exists(), "Sample pcap file must exist");
 
     let packets = PacketLoader::load_from_file(pcap_path).expect("Failed to load sample pcap");
@@ -57,7 +57,7 @@ fn test_load_sample_pcap() {
 
 #[test]
 fn test_display_filter_engine() {
-    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let pcap_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/telnet-cooked.pcap");
     let packets = PacketLoader::load_from_file(pcap_path).expect("Failed to load sample pcap");
 
     // Test protocol filter: TCP
@@ -89,7 +89,7 @@ fn test_display_filter_engine() {
 
 #[test]
 fn test_stream_follow() {
-    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let pcap_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/telnet-cooked.pcap");
     let packets = PacketLoader::load_from_file(pcap_path).expect("Failed to load sample pcap");
 
     // Find a telnet packet with payload
@@ -115,7 +115,7 @@ fn test_stream_follow() {
 
 #[test]
 fn test_conversations_analysis() {
-    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let pcap_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/telnet-cooked.pcap");
     let packets = PacketLoader::load_from_file(pcap_path).expect("Failed to load sample pcap");
 
     let convs = Conversations::build(&packets);
@@ -135,7 +135,7 @@ fn test_conversations_analysis() {
 
 #[test]
 fn test_load_streaming() {
-    let pcap_path = "../termshark/scripts/pcaps/telnet-cooked.pcap";
+    let pcap_path = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/data/telnet-cooked.pcap");
     let file = std::fs::File::open(pcap_path).expect("Failed to open sample pcap");
     let (tx, rx) = std::sync::mpsc::channel();
 
