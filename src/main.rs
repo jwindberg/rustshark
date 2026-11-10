@@ -14,7 +14,7 @@ use crossterm::{
 };
 use packet::loader::PacketLoader;
 use ratatui::{backend::CrosstermBackend, Terminal};
-use std::io::{stdout, IsTerminal};
+use std::io::stdout;
 use std::panic;
 use std::path::Path;
 use std::time::Duration;
@@ -151,7 +151,7 @@ fn main() -> Result<()> {
     }
 
     // 2. Check if piped input is arriving on stdin (e.g. tcpdump ... | rustshark)
-    let stdin_has_data = !std::io::stdin().is_terminal();
+    let stdin_has_data = stdin_is_piped();
 
     // 3. Determine file or source to read
     let (pcap_path, initial_filter) = if stdin_has_data && cli.read_file.is_none() && cli.interface.is_none() {
@@ -251,4 +251,24 @@ fn main() -> Result<()> {
 
     println!("Rustshark exited cleanly.");
     Ok(())
+}
+
+/// Whether packets are being fed in on stdin: a pipe or a redirected file.
+/// Not a terminal, and not /dev/null or nothing at all, as when a desktop
+/// menu starts rustshark without a terminal.
+#[cfg(unix)]
+fn stdin_is_piped() -> bool {
+    use std::os::fd::AsFd;
+    use std::os::unix::fs::FileTypeExt;
+    let Ok(fd) = std::io::stdin().as_fd().try_clone_to_owned() else { return false };
+    match std::fs::File::from(fd).metadata() {
+        Ok(meta) => meta.file_type().is_fifo() || meta.file_type().is_file(),
+        Err(_) => false,
+    }
+}
+
+#[cfg(not(unix))]
+fn stdin_is_piped() -> bool {
+    use std::io::IsTerminal;
+    !std::io::stdin().is_terminal()
 }
